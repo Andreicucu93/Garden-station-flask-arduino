@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Garden Station Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .sensor-card {
+            text-align: center;
+            padding: 20px;
+            margin: 10px;
+            border-radius: 10px;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            padding: 10px;
+            background: white;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container text-center mt-5">
+        <h1>🌱 Garden Station Dashboard</h1>
+        <div class="row mt-4">
+            <div class="col-md-4">
+                <div class="sensor-card bg-primary text-white">
+                    <h3>Soil Moisture</h3>
+                    <h2 id="moisture">Loading...</h2>
+                    <p id="moisture-status"></p>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="sensor-card bg-danger text-white">
+                    <h3>Temperature</h3>
+                    <h2 id="temperature">Loading...</h2>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="sensor-card bg-success text-white">
+                    <h3>Humidity</h3>
+                    <h2 id="humidity">Loading...</h2>
+                </div>
+            </div>
+        </div>
+
+        <h2 class="mt-4">📊 Soil Moisture Data Over Time</h2>
+        <img id="soil_moisture_graph" src="{{ url_for('static', filename='soil_moisture_graph.png') }}" alt="Soil Moisture Graph" class="img-fluid">
+
+        <h2 class="mt-4">📊 Temperature & Humidity Data Over Time</h2>
+        <img id="temp_humidity_graph" src="{{ url_for('static', filename='temp_humidity_graph.png') }}" alt="Temperature & Humidity Graph" class="img-fluid">
+    </div>
+
+    <script>
+        function fetchData() {
+            $.getJSON("/data", function(data) {
+                $("#moisture").text(data.soil_moisture);
+                $("#temperature").text(data.temperature + " °C");
+                $("#humidity").text(data.humidity + " %");
+
+                let moistureStatus = "";
+                if (data.soil_moisture < 300) {
+                    moistureStatus = "⚠️ Too much water!";
+                } else if (data.soil_moisture >= 300 && data.soil_moisture <= 550) {
+                    moistureStatus = "✅ Good";
+                } else {
+                    moistureStatus = "⚠️ Dry, needs water!";
+                }
+
+                $("#moisture-status").text(moistureStatus);
+            });
+        }
+
+        function refreshGraphs() {
+            $("#soil_moisture_graph").attr("src", "{{ url_for('static', filename='soil_moisture_graph.png') }}?" + new Date().getTime());
+            $("#temp_humidity_graph").attr("src", "{{ url_for('static', filename='temp_humidity_graph.png') }}?" + new Date().getTime());
+        }
+
+        setInterval(fetchData, 5000);
+        setInterval(refreshGraphs, 15000);
+        fetchData();
+    </script>
+
+</body>
+</html>

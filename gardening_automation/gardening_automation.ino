@@ -3,7 +3,7 @@
 #include <Adafruit_SSD1306.h>
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
-#include <DHT_U.h> 
+#include <DHT_U.h>
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -149,4 +149,3 @@ void loop()
         isPumping = false;
     }
 }
-
