@@ -5,21 +5,48 @@ import time
 import threading
 import matplotlib.pyplot as plt
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 app = Flask(__name__, template_folder="templates")
 
-# File paths
 CSV_FILE = "/home/andrei/shared/GardenStation_log.csv"
 STATIC_FOLDER = "static"
 SOIL_GRAPH_PATH = os.path.join(STATIC_FOLDER, "soil_moisture_graph.png")
 TEMP_HUMIDITY_GRAPH_PATH = os.path.join(STATIC_FOLDER, "temp_humidity_graph.png")
+MAX_FILE_AGE = timedelta(hours=12)
+
+
+new_data_logged = True  # Set to True by default to ensure graph generation
+
+# Function to check if graphs need to be updated
+def generate_graphs_if_needed():
+    if not os.path.exists(SOIL_GRAPH_PATH) or not os.path.exists(TEMP_HUMIDITY_GRAPH_PATH):
+        print("📂 Graph files not found. Generating graphs...")
+        generate_graphs()
+        return
+
+    soil_graph_mtime = datetime.fromtimestamp(os.path.getmtime(SOIL_GRAPH_PATH))
+    temp_humidity_graph_mtime = datetime.fromtimestamp(os.path.getmtime(TEMP_HUMIDITY_GRAPH_PATH))
+
+    now = datetime.now()
+    soil_graph_age = now - soil_graph_mtime
+    temp_humidity_graph_age = now - temp_humidity_graph_mtime
+
+    if soil_graph_age > MAX_FILE_AGE or temp_humidity_graph_age > MAX_FILE_AGE:
+        print("⏰ Graphs are older than 12 hours. Generating new graphs...")
+        generate_graphs()
+    else:
+        print("✅ Graphs are up-to-date. No need to generate.")
+
 
 def generate_graphs():
     try:
         # Read the CSV file
         df = pd.read_csv(CSV_FILE)
         print(f"🔍 Original CSV Columns: {df.columns}")
+
+        # Remove rows with any cell containing a 0
+        df = df[(df != 0).all(axis=1)]
 
         # Normalize column names
         df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
@@ -68,7 +95,8 @@ def generate_graphs():
 
         # **Graph 1: Soil Moisture**
         plt.figure(figsize=(10, 5))
-        plt.plot(daily_avg.index, daily_avg["Soil Moisture"], label="Soil Moisture", marker="o", linestyle="-", color="blue")
+        plt.plot(daily_avg.index, daily_avg["Soil Moisture"], label="Soil Moisture", marker="o", linestyle="-",
+                 color="blue")
         plt.xlabel("Date")
         plt.ylabel("Soil Moisture")
         plt.title("Daily Average Soil Moisture")
@@ -80,8 +108,10 @@ def generate_graphs():
 
         # **Graph 2: Temperature & Humidity**
         plt.figure(figsize=(10, 5))
-        plt.plot(daily_avg.index, daily_avg["Temperature"], label="Temperature (°C)", marker="s", linestyle="--", color="red")
-        plt.plot(daily_avg.index, daily_avg["Humidity"], label="Humidity (%)", marker="^", linestyle="-.", color="green")
+        plt.plot(daily_avg.index, daily_avg["Temperature"], label="Temperature (°C)", marker="s", linestyle="--",
+                 color="red")
+        plt.plot(daily_avg.index, daily_avg["Humidity"], label="Humidity (%)", marker="^", linestyle="-.",
+                 color="green")
         plt.xlabel("Date")
         plt.ylabel("Values")
         plt.title("Daily Average Temperature & Humidity")
@@ -95,32 +125,25 @@ def generate_graphs():
 
     except Exception as e:
         print(f"⚠️ Error generating graphs: {e}")
-
-
-# Ensure the CSV file exists
 try:
     df = pd.read_csv(CSV_FILE)
-    print("📂 Loaded existing data.")
+    df = df[(df != 0).all(axis=1)]
 except FileNotFoundError:
     df = pd.DataFrame(columns=["Timestamp", "Soil Moisture", "Temperature", "Humidity"])
     df.to_csv(CSV_FILE, index=False)
-    print("🆕 No existing data found. Created a new CSV file.")
-
 
 try:
     arduino = serial.Serial(port="/dev/ttyACM0", baudrate=9600, timeout=1)
-    time.sleep(2)  # Allow time for Arduino to initialize
+    time.sleep(2)
 except Exception as e:
     print("⚠️ Error connecting to Arduino:", e)
     arduino = None
 
 latest_data = {"soil_moisture": 0, "temperature": 0, "humidity": 0}
 
-
 @app.route('/')
 def index():
-    """ Renders the main page with both graphs. """
-    generate_graphs()
+    generate_graphs_if_needed()
     return render_template(
         "index.html",
         soil_graph_url=url_for('static', filename='soil_moisture_graph.png'),
@@ -132,27 +155,21 @@ def index():
 def get_data():
     return jsonify(latest_data)
 
-
-# Function to read data from Arduino in a background thread
 serial_lock = threading.Lock()
-
-
-# Global variable to store the last time data was logged
 last_logged_time = None
 
 def read_arduino():
-    global latest_data, arduino, last_logged_time
+    global latest_data, arduino, last_logged_time, new_data_logged
     while True:
         try:
-            with serial_lock:  # Prevent multiple accesses
+            with serial_lock:
                 if arduino is None or not arduino.is_open:
                     print("⚠️ Reconnecting to Arduino...")
                     arduino = serial.Serial(port="/dev/ttyACM0", baudrate=9600, timeout=1)
-                    time.sleep(2)  # Give time to reconnect
+                    time.sleep(2)
 
                 if arduino.in_waiting > 0:
                     line = arduino.readline().decode("utf-8").strip()
-                    print("📥 Received:", line)
 
                     if line.startswith("Soil Moisture:"):
                         latest_data["soil_moisture"] = int(line.split(":")[1])
@@ -161,34 +178,25 @@ def read_arduino():
                     elif line.startswith("Hum:"):
                         latest_data["humidity"] = float(line.split(":")[1])
 
-                    # Get the current time
                     now = datetime.now()
-
-                    # Only log if at least 1 hour has passed since last logged time
                     if last_logged_time is None or (now - last_logged_time).total_seconds() >= 3600:
-                        last_logged_time = now  # Update last logged time
+                        last_logged_time = now
+                        new_data_logged = True
 
-                        # Save data to CSV
-                        with open(CSV_FILE, "a") as f:
-                            timestamp_time = now.strftime("%H:%M:%S")
-                            timestamp_date = now.strftime("%-m/%-d/%Y")
-                            f.write(f"{latest_data['soil_moisture']},{latest_data['temperature']},{latest_data['humidity']},{timestamp_time},{timestamp_date}")
+                        df = pd.DataFrame([[latest_data["soil_moisture"], latest_data["temperature"], latest_data["humidity"], now.strftime("%H:%M:%S"), now.strftime("%Y-%m-%d")]],
+                                          columns=["Soil Moisture", "Temperature", "Humidity", "Time", "Date"])
+                        df.to_csv(CSV_FILE, mode='a', header=not os.path.exists(CSV_FILE), index=False)
 
                         print("✅ Data logged to CSV")
 
-                        # Generate new graphs
-                        generate_graphs()
-
         except serial.SerialException as e:
             print("⚠️ Serial error:", e)
-            arduino = None  # Reset Arduino object to attempt reconnection
+            arduino = None
             time.sleep(5)  # Wait before retrying
-
-
-
-# Start Arduino thread
+        time.sleep(0.1)  # Reduce CPU usage
+print(f'Columns: {df.columns}')
 if arduino:
     threading.Thread(target=read_arduino, daemon=True).start()
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8000, debug=True)
+    app.run(host='0.0.0.0', port=8000, debug=False)
